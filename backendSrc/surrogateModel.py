@@ -11,31 +11,40 @@ from keras.models import load_model
 
 import keras.backend as K
 
+import pdb
+
 #class to enable uncertainty quantification with NN
-class KerasDropoutPrediction(object):
-    def __init__(self,model):
-        self.f = K.function(
-                [model.layers[0].input, 
-                 K.learning_phase()],
-                [model.layers[-1].output])
-    def predict(self,x, n_iter=10):
+class KerasDropoutPrediction:
+    def __init__(self, model):
+        self.model = model
+
+    def predict(self, x, n_iter=10):
         result = []
         for _ in range(n_iter):
-            result.append(self.f([x , 1]))
-        result = np.array(result).reshape(n_iter,400)
+            # Run the model with dropout by setting training=True
+            prediction = self.model(x, training=True)
+            result.append(prediction)
+        result = np.array(result).reshape(n_iter, x.shape[0], -1)  # Adjust the reshape parameters as needed
         return result
 
 #the predictor function
 #input : KerasDropoutPrediction object, and (35,) size input numpy array 
 #output: Mean predicted protein values(400,), Std deviation of the predicted values (400,) 
 def dropout_predictor(m_object, param_in):
-    new_input = np.zeros((1,35))
-    for i in range(0,35):
-        new_input[0][i] = param_in[i]
-    y_pred = m_object.predict(new_input,n_iter=100)
-    y_pred_mean = y_pred.mean(axis=0)
-    y_pred_std = y_pred.std(axis=0)
-    return y_pred_mean,y_pred_std
+    # Ensure the input array is exactly 35 elements long
+    assert param_in.shape == (35,), "Input array must be of shape (35,)"
+
+    # Prepare input for prediction: reshape it to (1, 35)
+    new_input = np.expand_dims(param_in, axis=0)
+
+    # Perform prediction using the Monte Carlo Dropout method with 100 iterations
+    y_pred = m_object.predict(new_input, n_iter=100)
+
+    # Calculate the mean and standard deviation across the predictions
+    y_pred_mean = np.mean(y_pred, axis=0)
+    y_pred_std = np.std(y_pred, axis=0)
+
+    return y_pred_mean, y_pred_std
 
 #load the trained NN surrogate model
 M3 = load_model('./new_MLP_yeast_35_1024_800_500_400_epochs5000_dropout_datasize_3000_split_0_1.h5')
@@ -58,7 +67,8 @@ def main(input_parameter):
     #  -0.535368, -0.205101,  0.626929,  0.357102,  0.813448, -0.859384,  0.635532])
 
     #actual call to the predictor
-    mean_outcome, std_outcome = dropout_predictor(M3_dp_predictor,input_parameter)
+    mean_outcome, std_outcome = dropout_predictor(M3_dp_predictor, input_parameter)
+    pdb.set_trace()
 
     #create a json object
     NNVA_dict = {'curve_mean': mean_outcome.tolist(), 'curve_std': std_outcome.tolist()}
